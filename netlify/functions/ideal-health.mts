@@ -84,6 +84,8 @@ export default async (request: Request, context: Context) => {
       signal: abort.signal,
     });
 
+    const body = await response.text();
+
     report.latencyMs = Date.now() - startedAt;
     report.status = response.status;
 
@@ -98,10 +100,23 @@ export default async (request: Request, context: Context) => {
     } else if (response.status === 404 || response.status === 400) {
       report.state = "model";
       report.detail = "The configured model id was not accepted. It may have been renamed or retired.";
+      /* A 404 here has two very different causes that took a round trip each to
+         tell apart: an id that does not exist, and a real id the account's data
+         policy is not allowed to route to. The provider says which, so classify
+         its wording rather than echoing it — the body can quote the request
+         back, and the model id is not something this endpoint publishes. */
+      report.cause = /data polic|no allowed provider|privacy/i.test(body)
+        ? "data-policy — the account's Data Training / privacy settings do not permit routing to this model. Free variants usually require Data Training to be enabled."
+        : /no endpoints|not a valid model|model not found|unknown model/i.test(body)
+          ? "unknown-model — the provider has no such id. Copy the exact slug from its page on the provider's model list; a ':free' suffix only works on models that publish a free variant."
+          : "unclassified — see the function log for the provider's own wording.";
     } else {
       report.state = "upstream";
       report.detail = "The provider answered with an error.";
     }
+
+    // The provider's own text, for the logs only. Never the response body.
+    if (!response.ok) console.warn(`Ideal AI health: ${response.status} — ${body.slice(0, 400)}`);
   } catch (error: any) {
     report.latencyMs = Date.now() - startedAt;
     report.state = abort.signal.aborted ? "timeout" : "network";
