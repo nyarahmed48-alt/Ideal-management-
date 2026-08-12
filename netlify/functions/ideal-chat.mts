@@ -20,15 +20,18 @@
 import type { Config, Context } from "@netlify/functions";
 import { CONTACT_FACTS, getSiteKnowledge, knowledgeToPrompt } from "../../lib/knowledge.mts";
 
-/* Free model ids get renamed and retired constantly, which is exactly why the
-   model is an environment variable rather than a constant: moving is a setting
-   change, not a release.
+/* Free model ids get renamed and retired, which is why the model is an
+   environment variable rather than a constant: moving is a setting change, not
+   a release.
 
-   Treat this default as a placeholder, not a working value — it answered 404
-   ("model id not accepted") in testing on 2026-08-12. Set OPENROUTER_MODEL to a
-   live id from https://openrouter.ai/models, and list two comma-separated so a
-   daily cap on the first does not take the assistant down. /api/ideal-health
-   says which of them the provider is actually accepting. */
+   This id was verified live on 2026-08-12. It spent a while looking dead —
+   every call 404'd — but the id was fine and the account had an Allowed
+   Providers allowlist that excluded its provider. Worth remembering before
+   swapping ids again: a 404 here is at least as likely to be an account
+   setting as a bad id, and /api/ideal-health says which.
+
+   Set OPENROUTER_MODEL to two ids comma-separated so a daily cap on the first
+   does not take the assistant down with it. */
 const DEFAULT_MODEL = "poolside/laguna-xs-2.1:free";
 
 /** Replies are short by design — this is a front-desk assistant, not an essayist. */
