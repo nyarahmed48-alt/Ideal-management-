@@ -169,9 +169,8 @@
       <span class="form-done__badge" aria-hidden="true">✓</span>
       <h4>You are in the pool.</h4>
       <p>
-        A consultant reads every CV that comes in — usually within two working days.
-        If you match a live role we will call you before your details go anywhere near
-        an employer.
+        A consultant reads every CV that comes in. If you match a live role we will
+        call you before your details go anywhere near an employer.
       </p>
       <p>Want your details removed? Message us on +964 772 252 1000 or email imanagement19@gmail.com and it is done that day.</p>
     `,
@@ -185,8 +184,8 @@
       <span class="form-done__badge" aria-hidden="true">✓</span>
       <h4>Request received.</h4>
       <p>
-        One of our consultants will come back to you within one working day with first
-        thoughts on the role and who we already have for it.
+        One of our consultants will come back to you with first thoughts on the role
+        and who we already have for it.
       </p>
     `,
   });
@@ -199,8 +198,8 @@
       <span class="form-done__badge" aria-hidden="true">✓</span>
       <h4>Message sent.</h4>
       <p>
-        We have your number and we will call you back within one working day. If it is
-        urgent, ring or WhatsApp us on
+        We have your number and we will call you back. If it is urgent, ring or
+        WhatsApp us on
         <a href="tel:+9647722521000">+964 772 252 1000</a> and skip the queue.
       </p>
     `,
