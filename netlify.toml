@@ -14,6 +14,19 @@
   publish = "public"
   command = ""
 
+[build.environment]
+  # Netlify's secret scanner looks for the *values* of environment variables in
+  # the build output. OPENROUTER_MODEL holds a public model id, and that same id
+  # is the fallback default in the functions — so the scanner finds it and fails
+  # the build over a string that was never a secret.
+  #
+  # Omit that one variable by name rather than reaching for
+  # SECRETS_SCAN_ENABLED = "false". The scanner is the thing that would catch
+  # OPENROUTER_API_KEY if it were ever committed by accident, and switching it
+  # off wholesale to silence a false positive trades a real safeguard for
+  # convenience. Anything added here must be genuinely non-secret.
+  SECRETS_SCAN_OMIT_KEYS = "OPENROUTER_MODEL"
+
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
