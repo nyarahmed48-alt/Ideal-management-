@@ -19,6 +19,7 @@
 
 import type { Config, Context } from "@netlify/functions";
 import { getSiteKnowledge } from "../../lib/knowledge.mts";
+import { apiKeyVariable, readApiKey } from "../../lib/provider.mts";
 
 const DEFAULT_MODEL = "poolside/laguna-xs-2.1:free";
 const PROBE_TIMEOUT_MS = 12_000;
@@ -71,7 +72,11 @@ export default async (request: Request, context: Context) => {
     });
   }
 
-  const apiKey = Netlify.env.get("OPENROUTER_API_KEY");
+  const apiKey = readApiKey();
+  // A key set under a name the code does not read is invisible from the
+  // outside: it looks identical to no key at all. So name the one it found.
+  const keyVariable = apiKeyVariable();
+
   const models = (Netlify.env.get("OPENROUTER_MODEL") || DEFAULT_MODEL)
     .split(",")
     .map((model) => model.trim())
@@ -88,6 +93,7 @@ export default async (request: Request, context: Context) => {
   const report: Record<string, unknown> = {
     service: "ideal-ai",
     keyConfigured: Boolean(apiKey),
+    keyVariable,
     modelsConfigured: models.length,
     knowledge: {
       source: knowledge.source,
@@ -103,7 +109,7 @@ export default async (request: Request, context: Context) => {
 
   if (!apiKey) {
     report.state = "not-configured";
-    report.detail = "OPENROUTER_API_KEY is not set on this deployment.";
+    report.detail = "No key on this deployment — set OPENROUTER_API_KEY (or OPENROUTER_KEY).";
     return new Response(JSON.stringify(report, null, 2), {
       status: 503,
       headers: { "content-type": "application/json", "cache-control": "no-store" },

@@ -12,13 +12,14 @@
  * Configure on the Netlify project (Project configuration → Environment
  * variables), not here:
  *
- *   OPENROUTER_API_KEY    required — https://openrouter.ai/keys
+ *   OPENROUTER_API_KEY    required — https://openrouter.ai/keys (OPENROUTER_KEY also accepted)
  *   OPENROUTER_MODEL      optional — comma-separated ids, tried in order
  *   OPENROUTER_BASE_URL   optional — point at a proxy or a stand-in endpoint
  */
 
 import type { Config, Context } from "@netlify/functions";
 import { CONTACT_FACTS, getSiteKnowledge, knowledgeToPrompt } from "../../lib/knowledge.mts";
+import { readApiKey } from "../../lib/provider.mts";
 
 /* Free model ids get renamed and retired, which is why the model is an
    environment variable rather than a constant: moving is a setting change, not
@@ -83,7 +84,7 @@ const jsonResponse = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 
 function providerConfig() {
-  const apiKey = Netlify.env.get("OPENROUTER_API_KEY");
+  const apiKey = readApiKey();
   if (!apiKey) return null;
 
   const models = (Netlify.env.get("OPENROUTER_MODEL") || DEFAULT_MODEL)
