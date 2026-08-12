@@ -6,8 +6,15 @@
  * exhausted free tier, a retired model id and a site the crawler cannot read
  * are told apart from a browser instead of guessed at.
  *
- * Safe to leave public: it returns states, status codes and page paths. Never
- * the key, never the model ids, never the provider's own error text.
+ * When the configured id is rejected it also asks the provider which free ids
+ * it actually publishes, and lists some. Guessing model ids from memory is how
+ * this endpoint came to exist: they are renamed and retired constantly, and
+ * ":free" is part of an id rather than a suffix that can be appended to any
+ * model. A list from the provider itself ends the guessing.
+ *
+ * Safe to leave public: it returns states, status codes, page paths and ids
+ * from the provider's public catalogue. Never the key, never the configured
+ * model id, never the provider's own error text.
  */
 
 import type { Config, Context } from "@netlify/functions";
@@ -15,6 +22,40 @@ import { getSiteKnowledge } from "../../lib/knowledge.mts";
 
 const DEFAULT_MODEL = "poolside/laguna-xs-2.1:free";
 const PROBE_TIMEOUT_MS = 12_000;
+const CATALOGUE_TIMEOUT_MS = 8_000;
+const SUGGESTIONS = 12;
+
+/**
+ * Free model ids the provider currently publishes, and whether the configured
+ * one is among them — which separates "no such id" from "real id, blocked by
+ * policy" with no ambiguity left in it.
+ */
+async function freeModelIds(base: string, apiKey: string, configured: string) {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), CATALOGUE_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${base}/models`, {
+      headers: { authorization: `Bearer ${apiKey}` },
+      signal: abort.signal,
+    });
+    if (!response.ok) return { error: `catalogue lookup returned ${response.status}` };
+
+    const payload: any = await response.json();
+    const all: string[] = (payload?.data ?? [])
+      .map((model: any) => String(model?.id ?? ""))
+      .filter(Boolean);
+
+    return {
+      configuredIdExists: all.includes(configured),
+      totalModels: all.length,
+      free: all.filter((id) => id.endsWith(":free")).sort().slice(0, SUGGESTIONS),
+    };
+  } catch (error: any) {
+    return { error: abort.signal.aborted ? "catalogue lookup timed out" : String(error?.message || error) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export default async (request: Request, context: Context) => {
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -108,8 +149,12 @@ export default async (request: Request, context: Context) => {
       report.cause = /data polic|no allowed provider|privacy/i.test(body)
         ? "data-policy — the account's Data Training / privacy settings do not permit routing to this model. Free variants usually require Data Training to be enabled."
         : /no endpoints|not a valid model|model not found|unknown model/i.test(body)
-          ? "unknown-model — the provider has no such id. Copy the exact slug from its page on the provider's model list; a ':free' suffix only works on models that publish a free variant."
+          ? "unknown-model — the provider has no such id. Copy one from `availableFreeModels` below; a ':free' suffix only works on models that publish a free variant."
           : "unclassified — see the function log for the provider's own wording.";
+
+      /* Only on a model-class failure, and only then: an extra call on every
+         health check would be waste, and this is exactly when it earns itself. */
+      report.availableFreeModels = await freeModelIds(base, apiKey, models[0]);
     } else {
       report.state = "upstream";
       report.detail = "The provider answered with an error.";
