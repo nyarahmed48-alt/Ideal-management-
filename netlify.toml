@@ -17,6 +17,10 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+  # Ideal AI answers from the site's own pages. Shipping the deployed HTML with
+  # the functions lets it read them off disk — no network call, no cold-start
+  # latency, and it cannot disagree with what was actually deployed.
+  included_files = ["public/**/*.html"]
 
 [[headers]]
   for = "/*"

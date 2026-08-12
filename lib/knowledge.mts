@@ -1,25 +1,36 @@
 /**
- * The site crawler behind Ideal AI.
+ * What Ideal AI knows about the site.
  *
  * Rather than hand-maintaining a copy of the site's content inside a prompt —
  * which goes stale the first time someone edits a page — the assistant reads
- * the live site and answers from what it finds. Edit the HTML, redeploy, and
- * Ideal AI knows the new wording without anyone touching this code.
+ * the pages themselves. Edit the HTML, redeploy, and Ideal AI knows the new
+ * wording without anyone touching this code.
  *
- * The crawl is deliberately small and bounded: same-origin pages only, a
- * handful of them, a few seconds, and a hard cap on how much text reaches the
- * model. A marketing site is a dozen pages, not a wiki.
+ * It reads them two ways, in this order:
+ *
+ *   1. Off the deploy's own filesystem, via `included_files` in netlify.toml.
+ *      No network, no latency, and it cannot disagree with what was deployed.
+ *   2. By crawling the live site over HTTP, if the files are not where we
+ *      expect — which also covers pages that are generated rather than shipped.
+ *
+ * The first attempt at this only had the crawl, and it came back with zero
+ * pages on the real deployment while reporting nothing about why. Hence both
+ * paths, and hence `note`: whichever way it goes, the health endpoint can say
+ * what happened rather than leaving an empty result to be guessed at.
  */
 
-/** Pages held in memory between warm invocations. A cold start re-crawls. */
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+
+/** Pages held in memory between warm invocations. A cold start re-reads. */
 const CACHE_TTL_MS = 15 * 60 * 1000;
 
 /** Bounds. Every one of these exists to keep a runaway crawl from eating the
  *  function's time budget or the model's context window. */
 const MAX_PAGES = 8;
 const MAX_DEPTH = 2;
-const PAGE_TIMEOUT_MS = 4_000;
-const CRAWL_BUDGET_MS = 7_000;
+const PAGE_TIMEOUT_MS = 6_000;
+const CRAWL_BUDGET_MS = 9_000;
 const MAX_CHARS_PER_PAGE = 6_000;
 const MAX_TOTAL_CHARS = 14_000;
 
@@ -32,12 +43,14 @@ export interface CrawledPage {
 export interface SiteKnowledge {
   pages: CrawledPage[];
   /** Where the content came from, for the health endpoint to report. */
-  source: "crawl" | "cache" | "none";
+  source: "files" | "crawl" | "cache" | "none";
   crawledAt: string | null;
+  /** How it went, in words — the thing whose absence made this hard to debug. */
+  note: string;
 }
 
 /* Module-scope cache. Declarations only — nothing runs at import time. */
-let cache: { at: number; pages: CrawledPage[] } | null = null;
+let cache: { at: number; pages: CrawledPage[]; source: "files" | "crawl"; note: string } | null = null;
 
 /**
  * The facts we will not let a crawl failure take away. These are also given to
@@ -120,32 +133,101 @@ function linksIn(html: string, origin: string, from: string): string[] {
   return [...found];
 }
 
-async function fetchPage(url: string): Promise<string | null> {
+/** One page over HTTP. Returns the reason on failure rather than a bare null —
+ *  an empty crawl with no explanation is what made this hard to diagnose. */
+async function fetchPage(url: string): Promise<{ html?: string; error?: string }> {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), PAGE_TIMEOUT_MS);
   try {
     const response = await fetch(url, {
       signal: abort.signal,
-      headers: { "user-agent": "IdealAI-SiteReader/1.0" },
+      redirect: "follow",
+      headers: { "user-agent": "IdealAI-SiteReader/1.0", accept: "text/html" },
     });
-    if (!response.ok) return null;
-    if (!/text\/html/i.test(response.headers.get("content-type") || "")) return null;
-    return await response.text();
-  } catch {
-    return null;
+    if (!response.ok) return { error: `HTTP ${response.status}` };
+
+    /* Only reject a content type we can positively identify as non-HTML. The
+       first version required a text/html header and treated a missing or
+       unusual one as a failure, which is one of the ways a crawl can come back
+       empty while every page is in fact fine. */
+    const type = response.headers.get("content-type") || "";
+    if (type && !/text\/html|application\/xhtml/i.test(type)) {
+      return { error: `content-type ${type}` };
+    }
+    return { html: await response.text() };
+  } catch (error: any) {
+    return { error: abort.signal.aborted ? `timeout after ${PAGE_TIMEOUT_MS}ms` : String(error?.message || error) };
   } finally {
     clearTimeout(timer);
   }
 }
 
 /**
+ * The deployed HTML, read straight off disk.
+ *
+ * netlify.toml ships `public/**` with the functions via `included_files`, but
+ * the working directory a function runs in is not something to take on faith,
+ * so try the handful of roots it could plausibly be and use the first that has
+ * pages in it.
+ */
+async function readLocalPages(): Promise<{ pages: CrawledPage[]; note: string }> {
+  const roots = [
+    process.env.LAMBDA_TASK_ROOT ? path.join(process.env.LAMBDA_TASK_ROOT, "public") : null,
+    path.join(process.cwd(), "public"),
+    path.join(process.cwd(), "..", "public"),
+  ].filter((root): root is string => Boolean(root));
+
+  const tried: string[] = [];
+
+  for (const root of roots) {
+    let names: string[];
+    try {
+      names = (await readdir(root)).filter((name: string) => /\.html?$/i.test(name));
+    } catch (error: any) {
+      tried.push(`${root} (${error?.code || "unreadable"})`);
+      continue;
+    }
+    if (!names.length) {
+      tried.push(`${root} (no .html)`);
+      continue;
+    }
+
+    // index.html first: it is the page most questions are really about.
+    names.sort((a, b) => (a.startsWith("index.") ? -1 : b.startsWith("index.") ? 1 : a.localeCompare(b)));
+
+    const pages: CrawledPage[] = [];
+    for (const name of names.slice(0, MAX_PAGES)) {
+      try {
+        const html = await readFile(path.join(root, name), "utf-8");
+        const text = toText(bodyOf(html));
+        if (!text) continue;
+        pages.push({
+          // The URL a visitor sees, not the filename on disk.
+          path: "/" + name.replace(/index\.html?$/i, "").replace(/\.html?$/i, ""),
+          title: titleOf(html),
+          text: text.slice(0, MAX_CHARS_PER_PAGE),
+        });
+      } catch {
+        /* One unreadable page should not lose the others. */
+      }
+    }
+
+    if (pages.length) return { pages, note: `read ${pages.length} page(s) from ${root}` };
+    tried.push(`${root} (no readable pages)`);
+  }
+
+  return { pages: [], note: `no local pages: ${tried.join("; ")}` };
+}
+
+/**
  * Breadth-first crawl of the site's own pages, starting at the homepage.
  * Returns whatever it managed to read — a partial crawl still beats none.
  */
-async function crawl(origin: string): Promise<CrawledPage[]> {
+async function crawl(origin: string): Promise<{ pages: CrawledPage[]; note: string }> {
   const deadline = Date.now() + CRAWL_BUDGET_MS;
   const seen = new Set<string>();
   const pages: CrawledPage[] = [];
+  const failures: string[] = [];
 
   let frontier = [new URL("/", origin).toString()];
   seen.add(frontier[0]);
@@ -156,11 +238,14 @@ async function crawl(origin: string): Promise<CrawledPage[]> {
     const batch = frontier.slice(0, MAX_PAGES - pages.length);
     // One level at a time, in parallel: eight small pages should not cost
     // eight round trips of latency.
-    const fetched = await Promise.all(batch.map(async (url) => ({ url, html: await fetchPage(url) })));
+    const fetched = await Promise.all(batch.map(async (url) => ({ url, ...(await fetchPage(url)) })));
 
     const next: string[] = [];
-    for (const { url, html } of fetched) {
-      if (!html) continue;
+    for (const { url, html, error } of fetched) {
+      if (!html) {
+        failures.push(`${new URL(url).pathname}: ${error || "no body"}`);
+        continue;
+      }
 
       const text = toText(bodyOf(html));
       if (text) {
@@ -181,25 +266,62 @@ async function crawl(origin: string): Promise<CrawledPage[]> {
     frontier = next;
   }
 
-  return pages;
+  const note = pages.length
+    ? `crawled ${pages.length} page(s) from ${origin}`
+    : `crawl of ${origin} found nothing — ${failures.join("; ") || "no pages reached"}`;
+  return { pages, note };
 }
 
-/** Crawled pages, from cache when they are fresh enough. Never throws. */
+/**
+ * The site's pages, from cache when fresh. Disk first, then the network.
+ * Never throws: a assistant that cannot read the site still answers from the
+ * contact facts, it just says less.
+ */
 export async function getSiteKnowledge(origin: string | undefined): Promise<SiteKnowledge> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) {
-    return { pages: cache.pages, source: "cache", crawledAt: new Date(cache.at).toISOString() };
+    return {
+      pages: cache.pages,
+      source: "cache",
+      crawledAt: new Date(cache.at).toISOString(),
+      note: `cached — ${cache.note}`,
+    };
   }
-  if (!origin) return { pages: [], source: "none", crawledAt: null };
+
+  const notes: string[] = [];
 
   try {
-    const pages = await crawl(origin);
-    if (!pages.length) return { pages: [], source: "none", crawledAt: null };
-    cache = { at: Date.now(), pages };
-    return { pages, source: "crawl", crawledAt: new Date(cache.at).toISOString() };
+    const local = await readLocalPages();
+    if (local.pages.length) {
+      cache = { at: Date.now(), pages: local.pages, source: "files", note: local.note };
+      return { pages: local.pages, source: "files", crawledAt: new Date(cache.at).toISOString(), note: local.note };
+    }
+    notes.push(local.note);
   } catch (error) {
-    console.warn("Ideal AI: site crawl failed —", error);
-    return { pages: [], source: "none", crawledAt: null };
+    notes.push(`local read failed: ${error}`);
   }
+
+  if (!origin) {
+    return { pages: [], source: "none", crawledAt: null, note: [...notes, "no origin to crawl"].join(" | ") };
+  }
+
+  try {
+    const crawled = await crawl(origin);
+    notes.push(crawled.note);
+    if (crawled.pages.length) {
+      cache = { at: Date.now(), pages: crawled.pages, source: "crawl", note: crawled.note };
+      return {
+        pages: crawled.pages,
+        source: "crawl",
+        crawledAt: new Date(cache.at).toISOString(),
+        note: notes.join(" | "),
+      };
+    }
+  } catch (error) {
+    notes.push(`crawl threw: ${error}`);
+  }
+
+  console.warn("Ideal AI: no site knowledge —", notes.join(" | "));
+  return { pages: [], source: "none", crawledAt: null, note: notes.join(" | ") };
 }
 
 /** The crawled pages as one block of prompt text, within the total cap. */

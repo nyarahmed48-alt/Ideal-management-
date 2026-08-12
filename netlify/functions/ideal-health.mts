@@ -32,7 +32,10 @@ export default async (request: Request, context: Context) => {
 
   // What the assistant knows is half of whether it works, so report it first:
   // a bot answering "I don't know" with a healthy key is usually an empty crawl.
-  const siteUrl = context.site?.url || Netlify.env.get("URL") || new URL(request.url).origin;
+  /* The origin the visitor actually reached is the one guaranteed to be live
+     and correct; the configured URL is only a fallback for when there is no
+     request to learn it from. */
+  const siteUrl = new URL(request.url).origin || context.site?.url || Netlify.env.get("URL");
   const knowledge = await getSiteKnowledge(siteUrl);
 
   const report: Record<string, unknown> = {
@@ -43,7 +46,10 @@ export default async (request: Request, context: Context) => {
       source: knowledge.source,
       pagesIndexed: knowledge.pages.length,
       paths: knowledge.pages.map((page) => page.path),
+      characters: knowledge.pages.reduce((total, page) => total + page.text.length, 0),
       crawledAt: knowledge.crawledAt,
+      // Says why when pagesIndexed is 0, instead of leaving it to be guessed at.
+      note: knowledge.note,
     },
     checkedAt: new Date().toISOString(),
   };

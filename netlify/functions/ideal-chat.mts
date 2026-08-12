@@ -20,8 +20,15 @@
 import type { Config, Context } from "@netlify/functions";
 import { CONTACT_FACTS, getSiteKnowledge, knowledgeToPrompt } from "../../lib/knowledge.mts";
 
-/** Free models get renamed and retired; the env var is how you move without a
- *  release. The default is the model this site launched on. */
+/* Free model ids get renamed and retired constantly, which is exactly why the
+   model is an environment variable rather than a constant: moving is a setting
+   change, not a release.
+
+   Treat this default as a placeholder, not a working value — it answered 404
+   ("model id not accepted") in testing on 2026-08-12. Set OPENROUTER_MODEL to a
+   live id from https://openrouter.ai/models, and list two comma-separated so a
+   daily cap on the first does not take the assistant down. /api/ideal-health
+   says which of them the provider is actually accepting. */
 const DEFAULT_MODEL = "poolside/laguna-xs-2.1:free";
 
 /** Replies are short by design — this is a front-desk assistant, not an essayist. */
@@ -201,7 +208,7 @@ export default async (request: Request, context: Context) => {
 
   /* Read the site. Falls back to the charter alone if the crawl comes back
      empty — the contact details are in there either way. */
-  const siteUrl = context.site?.url || Netlify.env.get("URL") || new URL(request.url).origin;
+  const siteUrl = new URL(request.url).origin || context.site?.url || Netlify.env.get("URL") || "";
   const knowledge = await getSiteKnowledge(siteUrl);
   const system = knowledge.pages.length
     ? `${CHARTER}\n\n=== CURRENT WEBSITE CONTENT (${knowledge.pages.length} pages) ===\n${knowledgeToPrompt(knowledge.pages)}`

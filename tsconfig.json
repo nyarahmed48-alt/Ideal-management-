@@ -4,7 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM"],
-    "types": ["@netlify/functions"],
+    "types": ["@netlify/functions", "node"],
     "strict": true,
     "noEmit": true,
     // Netlify bundles these with esbuild, which resolves the .mts specifier the
