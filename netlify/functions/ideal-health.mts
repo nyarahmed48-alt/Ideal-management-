@@ -34,10 +34,16 @@ async function freeModelIds(base: string, apiKey: string, configured: string) {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), CATALOGUE_TIMEOUT_MS);
   try {
-    const response = await fetch(`${base}/models`, {
-      headers: { authorization: `Bearer ${apiKey}` },
-      signal: abort.signal,
-    });
+    /* The catalogue is public. Sending the key made it answer 400 in
+       production, so ask for it the way it expects — unauthenticated — and
+       only fall back to the authenticated form if that is what works. */
+    let response = await fetch(`${base}/models`, { signal: abort.signal });
+    if (!response.ok) {
+      response = await fetch(`${base}/models`, {
+        headers: { authorization: `Bearer ${apiKey}` },
+        signal: abort.signal,
+      });
+    }
     if (!response.ok) return { error: `catalogue lookup returned ${response.status}` };
 
     const payload: any = await response.json();
@@ -146,8 +152,8 @@ export default async (request: Request, context: Context) => {
          policy is not allowed to route to. The provider says which, so classify
          its wording rather than echoing it — the body can quote the request
          back, and the model id is not something this endpoint publishes. */
-      report.cause = /data polic|no allowed provider|privacy/i.test(body)
-        ? "data-policy — the account's Data Training / privacy settings do not permit routing to this model. Free variants usually require Data Training to be enabled."
+      report.cause = /data polic|no allowed provider|privacy|no endpoints found matching/i.test(body)
+        ? "account-policy — the id is fine; the account will not route to it. Check, in this order: Settings > Privacy > Providers > Allowed Providers (an allowlist there blocks every provider not on it, which is easy to set and easy to forget), then Data Training, which free variants usually require. The Eligibility Preview on that page shows what the account can currently reach."
         : /no endpoints|not a valid model|model not found|unknown model/i.test(body)
           ? "unknown-model — the provider has no such id. Copy one from `availableFreeModels` below; a ':free' suffix only works on models that publish a free variant."
           : "unclassified — see the function log for the provider's own wording.";
