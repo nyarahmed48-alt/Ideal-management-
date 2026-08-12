@@ -19,6 +19,7 @@
 
 import type { Config, Context } from "@netlify/functions";
 import { getSiteKnowledge } from "../../lib/knowledge.mts";
+import { buildSystemPrompt } from "../../lib/prompt.mts";
 import { apiKeyVariable, readApiKey } from "../../lib/provider.mts";
 
 const DEFAULT_MODEL = "poolside/laguna-xs-2.1:free";
@@ -64,6 +65,99 @@ async function freeModelIds(base: string, apiKey: string, configured: string) {
   }
 }
 
+/**
+ * A probe built the way the chat endpoint builds its calls: same system prompt
+ * with the site pages in it, same temperature, same attribution headers.
+ *
+ * The minimal probe above answers "is the key good and the model id real".
+ * This one answers "does an actual conversation work" — which is the question
+ * a visitor is really asking, and the two can disagree. A model that accepts a
+ * bare 8-token ping can still reject the temperature parameter, or fall over a
+ * long system prompt. Small max_tokens keeps it cheap; the request shape, not
+ * the reply length, is what is under test.
+ */
+async function chatShapedProbe(
+  base: string,
+  apiKey: string,
+  model: string,
+  system: string,
+  siteUrl: string,
+) {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), PROBE_TIMEOUT_MS);
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+        "http-referer": siteUrl,
+        "x-title": "Ideal Management",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 32,
+        temperature: 0.4,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: "In one short sentence, what does Ideal Management do?" },
+        ],
+      }),
+      signal: abort.signal,
+    });
+
+    const body = await response.text();
+    const latencyMs = Date.now() - startedAt;
+    if (!response.ok) {
+      console.warn(`Ideal AI chat-probe: ${response.status} — ${body.slice(0, 400)}`);
+      return {
+        ok: false,
+        status: response.status,
+        latencyMs,
+        systemPromptChars: system.length,
+        hint: /temperature/i.test(body)
+          ? "the model rejected the temperature parameter"
+          : /context|token|too long|maximum/i.test(body)
+            ? "the system prompt is too long for this model's context window"
+            : "see the function log for the provider's own wording",
+      };
+    }
+
+    let payload: any = null;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      /* Fall through: an unparseable 200 is still a failure to answer. */
+    }
+    // A provider-side failure can arrive inside a 200, which is exactly the
+    // shape that makes a chat widget look broken while health looks fine.
+    if (payload?.error) {
+      console.warn(`Ideal AI chat-probe: 200 with error — ${body.slice(0, 400)}`);
+      return { ok: false, status: 200, latencyMs, systemPromptChars: system.length, hint: "provider returned an error inside a 200" };
+    }
+    const reply = String(payload?.choices?.[0]?.message?.content ?? "").trim();
+    return {
+      ok: Boolean(reply),
+      status: response.status,
+      latencyMs,
+      systemPromptChars: system.length,
+      replyChars: reply.length,
+      ...(reply ? {} : { hint: "the model answered with an empty completion — the chat treats that as a failure too" }),
+    };
+  } catch (error: any) {
+    return {
+      ok: false,
+      status: null,
+      latencyMs: Date.now() - startedAt,
+      systemPromptChars: system.length,
+      hint: abort.signal.aborted ? `no answer within ${PROBE_TIMEOUT_MS}ms` : String(error?.message || error),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export default async (request: Request, context: Context) => {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response(JSON.stringify({ error: "METHOD_NOT_ALLOWED" }), {
@@ -87,7 +181,7 @@ export default async (request: Request, context: Context) => {
   /* The origin the visitor actually reached is the one guaranteed to be live
      and correct; the configured URL is only a fallback for when there is no
      request to learn it from. */
-  const siteUrl = new URL(request.url).origin || context.site?.url || Netlify.env.get("URL");
+  const siteUrl = new URL(request.url).origin || context.site?.url || Netlify.env.get("URL") || "";
   const knowledge = await getSiteKnowledge(siteUrl);
 
   const report: Record<string, unknown> = {
@@ -144,6 +238,20 @@ export default async (request: Request, context: Context) => {
 
     if (response.ok) {
       report.state = "ok";
+      /* The simple probe passing is not the same as the chat working, so say
+         so explicitly rather than letting "ok" imply more than it proves. */
+      report.chatProbe = await chatShapedProbe(
+        base,
+        apiKey,
+        models[0],
+        buildSystemPrompt(knowledge.pages),
+        siteUrl,
+      );
+      if (!(report.chatProbe as any).ok) {
+        report.state = "chat-failing";
+        report.detail =
+          "The key and model id are fine, but a request shaped like a real conversation fails. See chatProbe.hint.";
+      }
     } else if (response.status === 401 || response.status === 403) {
       report.state = "auth";
       report.detail = "The key was rejected — it may be revoked or lack permission for this model.";
