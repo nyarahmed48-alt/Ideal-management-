@@ -106,6 +106,45 @@
         showFile();
       }
     });
+
+    /* A picked file is a reference, not a copy, and the reference can go stale
+       — moved, edited, or (commonly on mobile) chosen from a cloud provider
+       that later withdraws it. The browser only discovers this mid-upload, and
+       what the visitor sees is a blank error page reading
+       ERR_UPLOAD_FILE_CHANGED, with their filled-in form gone.
+
+       So read one byte before letting the submit go. If that fails the file is
+       already unreadable, and saying so — with the form still on screen — beats
+       finding out after the navigation. */
+    const cvForm = $("#cv-form");
+    const cvStatus = $("#cv-status");
+    if (cvForm) {
+      cvForm.addEventListener("submit", (event) => {
+        const file = cvFile.files && cvFile.files[0];
+        // Nothing chosen: let the browser's own required-field message handle it.
+        if (!file) return;
+
+        event.preventDefault();
+        file
+          .slice(0, 1)
+          .arrayBuffer()
+          .then(() => {
+            // Readable. Submit natively, bypassing this listener.
+            HTMLFormElement.prototype.submit.call(cvForm);
+          })
+          .catch(() => {
+            dropzone.classList.remove("has-file");
+            cvFile.value = "";
+            dropzoneText.innerHTML = "<strong>Choose your CV again</strong> or drop it here";
+            if (cvStatus) {
+              cvStatus.className = "form__status is-error";
+              cvStatus.textContent =
+                "Your device can no longer read that file — it may have been moved, or picked from cloud storage that has since released it. Please choose it again. Saving it to this device first is the most reliable.";
+            }
+            dropzone.scrollIntoView({ block: "center", behavior: "smooth" });
+          });
+      });
+    }
   }
 
   /* ========================================================= form submit ==
