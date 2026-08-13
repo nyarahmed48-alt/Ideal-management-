@@ -1,14 +1,13 @@
 /**
  * The system prompt Ideal AI answers under.
  *
- * Lives here rather than inside the chat function so the health check can probe
- * with the real request shape. A probe that sends a bare "say ok" proves the
- * key and the model id work and nothing else — it will happily report healthy
- * while every actual conversation fails on a parameter the small request never
- * used. That gap cost a debugging round, so both now share this.
+ * Separate from the chat route so the health check can probe with the real
+ * thing. A probe that sends a bare "say ok" proves the key and the model id and
+ * nothing else — it will report healthy while every actual conversation fails
+ * on a parameter the small request never used. That gap cost a debugging round.
  */
 
-import { CONTACT_FACTS, knowledgeToPrompt, type CrawledPage } from "./knowledge.mts";
+import { CONTACT_FACTS, knowledgeToPrompt, type SitePage } from "./knowledge";
 
 /** The rules. Everything factual comes from the pages appended below them. */
 export const CHARTER = `
@@ -30,7 +29,7 @@ ${CONTACT_FACTS}
 `.trim();
 
 /** The charter, plus the site's current pages when there are any. */
-export function buildSystemPrompt(pages: CrawledPage[]): string {
+export function buildSystemPrompt(pages: SitePage[]): string {
   if (!pages.length) return CHARTER;
   return `${CHARTER}\n\n=== CURRENT WEBSITE CONTENT (${pages.length} pages) ===\n${knowledgeToPrompt(pages)}`;
 }

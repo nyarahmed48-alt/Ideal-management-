@@ -1,0 +1,47 @@
+{
+  // Ideal Management — one Worker serving the site and its four API routes.
+  //
+  // There is no build step. `public/` ships as written and the Worker handles
+  // /api/* and /admin. Connect this repository in the Cloudflare dashboard
+  // (Workers & Pages → Import a repository) and every push to main deploys.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ideal-management",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-13",
+
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    // Anything that is not a file gets the 404 page rather than the homepage:
+    // this is a set of real pages, not a single-page app.
+    "not_found_handling": "404-page",
+    // Static files are served without waking the Worker, except these — where
+    // the Worker is the whole point.
+    "run_worker_first": ["/api/*", "/admin", "/admin/*"]
+  },
+
+  // Form submissions and the CVs attached to them.
+  //
+  // KV rather than R2 because R2 needs enabling on the account first, and this
+  // works today. Values may be up to 25 MiB and a CV is capped at 8 MB, so it
+  // fits comfortably. If R2 is enabled later, add an UPLOADS bucket binding
+  // and the Worker will prefer it — that is a config change, not a code one.
+  "kv_namespaces": [
+    {
+      "binding": "SUBMISSIONS",
+      "id": "4403080e34d04757a50abfcd29996841"
+    }
+  ],
+
+  // Plain variables, editable in the dashboard and live immediately — no
+  // redeploy, which is the whole reason for moving off the previous host.
+  // The API key is NOT here: it is a Secret, set in the dashboard or with
+  // `wrangler secret put OPENROUTER_API_KEY`, so it never sits in the repo.
+  "vars": {
+    "OPENROUTER_MODEL": "poolside/laguna-xs-2.1:free"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}

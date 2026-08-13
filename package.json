@@ -3,17 +3,16 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Ideal Management — recruitment, HR and business management site, with the Ideal AI assistant.",
-  "engines": {
-    "node": ">=20"
-  },
+  "description": "Ideal Management — recruitment, HR and business management, with the Ideal AI assistant. Runs as a single Cloudflare Worker serving public/ plus four API routes.",
   "scripts": {
-    "dev": "netlify dev",
-    "lint": "tsc --noEmit -p tsconfig.json"
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "types": "wrangler types"
   },
   "devDependencies": {
-    "@netlify/functions": "^3.0.0",
-    "@types/node": "^22.20.1",
-    "typescript": "~5.8.2"
+    "@cloudflare/workers-types": "^5.20260811.1",
+    "typescript": "~5.8.2",
+    "wrangler": "^4.30.0"
   }
 }

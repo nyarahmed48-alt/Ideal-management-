@@ -191,7 +191,7 @@
           // Replace the live reference with the copy taken at pick time.
           body.set("cv", held.blob, held.name);
 
-          const response = await fetch(cvForm.getAttribute("action") || "/", {
+          const response = await fetch(cvForm.getAttribute("action") || "/api/submit", {
             method: "POST",
             body,
           });
