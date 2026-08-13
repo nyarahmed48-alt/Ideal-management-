@@ -43,9 +43,19 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "geolocation=(), microphone=(), camera=()"
 
-# Fingerprint-free asset names, so cache for an hour rather than a year: an
-# edit to the CSS should reach visitors the same day, not next month.
+# Asset URLs carry a ?v= query string that changes when the file does, so the
+# browser fetches a new URL rather than a cached one — which is what makes a
+# long cache safe. It was an hour with no version marker before, and that meant
+# a fix could sit invisible behind a stale copy for an hour, including from the
+# person trying to verify it.
 [[headers]]
   for = "/assets/*"
   [headers.values]
-    Cache-Control = "public, max-age=3600, must-revalidate"
+    Cache-Control = "public, max-age=86400, must-revalidate"
+
+# Never cache the pages themselves: they carry the ?v= markers, and a stale one
+# would point at stale assets and undo the whole scheme.
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

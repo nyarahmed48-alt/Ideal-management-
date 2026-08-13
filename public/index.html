@@ -26,7 +26,7 @@
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/styles.css?v=2" />
   </head>
 
   <body>
@@ -290,6 +290,7 @@
                 id="cv-form"
                 name="cv-pool"
                 method="POST"
+                action="/thanks"
                 data-netlify="true"
                 enctype="multipart/form-data"
                 netlify-honeypot="company-website"
@@ -402,7 +403,7 @@
                   <p>Tell us the role and we will come back to you quickly.</p>
                 </div>
 
-                <form class="form" id="hire-form" name="hire-request" method="POST" data-netlify="true" netlify-honeypot="fax-number">
+                <form class="form" id="hire-form" name="hire-request" method="POST" action="/thanks" data-netlify="true" netlify-honeypot="fax-number">
                   <input type="hidden" name="form-name" value="hire-request" />
                   <p class="hp" aria-hidden="true">
                     <label>Leave this field empty <input name="fax-number" tabindex="-1" /></label>
@@ -622,6 +623,6 @@
       <p class="chat__foot">Ideal AI can make mistakes. Do not share confidential details.</p>
     </section>
 
-    <script src="/assets/app.js" defer></script>
+    <script src="/assets/app.js?v=2" defer></script>
   </body>
 </html>

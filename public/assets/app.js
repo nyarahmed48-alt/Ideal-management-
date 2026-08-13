@@ -108,121 +108,20 @@
     });
   }
 
-  /* ========================================================= form submit == */
+  /* ========================================================= form submit ==
 
-  /**
-   * Netlify Forms accepts a normal POST to any path on the site as long as the
-   * body carries `form-name`. Submitting over fetch keeps the visitor on the
-   * page — and, for the CV form, lets us keep the file in a FormData body
-   * rather than navigating away mid-upload.
-   */
-  function wireForm(form, { statusEl, button, busyLabel, done }) {
-    if (!form) return;
+     The three forms submit natively — no fetch, no interception.
 
-    const idleLabel = button ? button.textContent : "";
+     They were AJAX at first, for an inline success panel without leaving the
+     page. Netlify rejected those POSTs and the browser gave us nothing to go
+     on, so this trades a nicety for the path the form host documents and tests
+     hardest: a plain browser submit to action="/thanks". When it fails now it
+     fails onto a page that says why, instead of a red line that cannot.
 
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      if (!form.reportValidity()) return;
-
-      statusEl.textContent = "";
-      statusEl.className = "form__status";
-      if (button) {
-        button.disabled = true;
-        button.textContent = busyLabel;
-      }
-
-      try {
-        const body = new FormData(form);
-        const response = await fetch(form.getAttribute("action") || "/", {
-          method: "POST",
-          body,
-        });
-        if (!response.ok) {
-          const error = new Error(`HTTP ${response.status}`);
-          error.status = response.status;
-          throw error;
-        }
-
-        const panel = form.parentElement;
-        form.remove();
-        const success = document.createElement("div");
-        success.className = "form-done";
-        success.innerHTML = done;
-        panel.appendChild(success);
-        success.setAttribute("tabindex", "-1");
-        success.focus();
-      } catch (error) {
-        console.error("Form submission failed", error);
-        statusEl.className = "form__status is-error";
-        /* Name the failure. "That did not go through" alone sends whoever is
-           debugging back to guessing, and a 404 here (the form host has not
-           registered this form) needs a completely different fix from a 413
-           (file too large) — which the visitor can act on themselves. */
-        const code = error && error.status;
-        const detail =
-          code === 404
-            ? " (error 404 — the form is not registered on the server yet)"
-            : code === 413
-              ? " (error 413 — the file is too large)"
-              : code
-                ? ` (error ${code})`
-                : " (no response from the server)";
-        statusEl.textContent =
-          "That did not go through" +
-          detail +
-          ". Please try again, or call or WhatsApp +964 772 252 1000, or email imanagement19@gmail.com, and we will pick it up from there.";
-        if (button) {
-          button.disabled = false;
-          button.textContent = idleLabel;
-        }
-      }
-    });
-  }
-
-  wireForm($("#cv-form"), {
-    statusEl: $("#cv-status"),
-    button: $("#cv-submit"),
-    busyLabel: "Uploading…",
-    done: `
-      <span class="form-done__badge" aria-hidden="true">✓</span>
-      <h4>You are in the pool.</h4>
-      <p>
-        A consultant reads every CV that comes in. If you match a live role we will
-        call you before your details go anywhere near an employer.
-      </p>
-      <p>Want your details removed? Message us on +964 772 252 1000 or email imanagement19@gmail.com and it is done that day.</p>
-    `,
-  });
-
-  wireForm($("#hire-form"), {
-    statusEl: $("#hire-status"),
-    button: $("#hire-submit"),
-    busyLabel: "Sending…",
-    done: `
-      <span class="form-done__badge" aria-hidden="true">✓</span>
-      <h4>Request received.</h4>
-      <p>
-        One of our consultants will come back to you with first thoughts on the role
-        and who we already have for it.
-      </p>
-    `,
-  });
-
-  wireForm($("#contact-form"), {
-    statusEl: $("#contact-status"),
-    button: $("#contact-submit"),
-    busyLabel: "Sending…",
-    done: `
-      <span class="form-done__badge" aria-hidden="true">✓</span>
-      <h4>Message sent.</h4>
-      <p>
-        We have your number and we will call you back. If it is urgent, ring or
-        WhatsApp us on
-        <a href="tel:+9647722521000">+964 772 252 1000</a> and skip the queue.
-      </p>
-    `,
-  });
+     What is left below is the file picker, which is presentation only. If the
+     inline panel is worth another attempt later, bring it back as an
+     enhancement over a form that already works without it.
+  ========================================================================== */
 
   /* ============================================================ Ideal AI == */
 
