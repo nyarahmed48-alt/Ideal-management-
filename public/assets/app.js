@@ -53,40 +53,100 @@
   const year = $("#year");
   if (year) year.textContent = String(new Date().getFullYear());
 
-  /* ====================================================== CV file picker == */
+  /* ====================================================== CV file picker ==
+
+     Why this is more than a styled <input type="file">.
+
+     A picked file is a reference, not a copy. On Android especially, a CV
+     chosen from Google Drive is a content:// URI the provider can withdraw at
+     any moment — and the browser only discovers that mid-upload, aborting with
+     ERR_UPLOAD_FILE_CHANGED and dumping the visitor on a blank error page with
+     everything they typed gone. Drive is where most people keep their CV, so
+     this is the common case, not an edge one.
+
+     So the file is read into memory the moment it is chosen, while the
+     reference is certainly still good, and the submit sends that copy. What
+     the provider does afterwards stops mattering. Reading a cloud file also
+     forces it to download, which is why picking one shows a preparing state.
+  ========================================================================== */
 
   const MAX_CV_BYTES = 8 * 1024 * 1024;
 
   const dropzone = $("#dropzone");
   const cvFile = $("#cv-file");
   const dropzoneText = $("#dropzone-text");
+  const cvForm = $("#cv-form");
+  const cvStatus = $("#cv-status");
+  const cvSubmit = $("#cv-submit");
 
   if (dropzone && cvFile && dropzoneText) {
-    const describe = (file) => {
-      const mb = file.size / (1024 * 1024);
-      const size = mb < 0.1 ? `${Math.max(1, Math.round(file.size / 1024))} KB` : `${mb.toFixed(1)} MB`;
-      return `${file.name} · ${size}`;
+    /** The in-memory copy: what actually gets uploaded. */
+    let held = null;
+    /** True while a file is being read, so submit can wait rather than fail. */
+    let reading = false;
+
+    const setStatus = (text, kind) => {
+      if (!cvStatus) return;
+      cvStatus.className = "form__status" + (kind ? ` is-${kind}` : "");
+      cvStatus.textContent = text || "";
     };
 
-    const showFile = () => {
-      const file = cvFile.files && cvFile.files[0];
-      if (!file) {
-        dropzone.classList.remove("has-file");
-        dropzoneText.innerHTML = "<strong>Choose a file</strong> or drop it here";
-        return;
-      }
+    const describe = (name, size) => {
+      const mb = size / (1024 * 1024);
+      const pretty = mb < 0.1 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${mb.toFixed(1)} MB`;
+      return `${name} · ${pretty}`;
+    };
+
+    const clearFile = (message) => {
+      held = null;
+      cvFile.value = "";
+      dropzone.classList.remove("has-file", "is-reading");
+      dropzoneText.innerHTML = message || "<strong>Choose a file</strong> or drop it here";
+    };
+
+    const take = async (file) => {
+      if (!file) return clearFile();
+
       if (file.size > MAX_CV_BYTES) {
-        // Rejecting here beats a 20-second upload that ends in a 413.
-        cvFile.value = "";
-        dropzone.classList.remove("has-file");
-        dropzoneText.innerHTML = "<strong>That file is over 8 MB.</strong> Please choose a smaller one.";
+        clearFile("<strong>That file is over 8 MB.</strong> Please choose a smaller one.");
+        setStatus("");
         return;
       }
-      dropzone.classList.add("has-file");
-      dropzoneText.textContent = describe(file);
+
+      held = null;
+      reading = true;
+      dropzone.classList.remove("has-file");
+      dropzone.classList.add("is-reading");
+      dropzoneText.innerHTML = "<strong>Preparing your file…</strong> this can take a moment from cloud storage";
+      setStatus("");
+      if (cvSubmit) cvSubmit.disabled = true;
+
+      try {
+        // Reading now is the whole point: the copy outlives the reference.
+        const buffer = await file.arrayBuffer();
+        held = {
+          blob: new Blob([buffer], { type: file.type || "application/octet-stream" }),
+          name: file.name || "cv",
+          size: buffer.byteLength,
+        };
+        dropzone.classList.remove("is-reading");
+        dropzone.classList.add("has-file");
+        dropzoneText.textContent = describe(held.name, held.size);
+      } catch (error) {
+        console.error("Could not read the chosen file", error);
+        clearFile("<strong>Choose your CV again</strong> or drop it here");
+        setStatus(
+          "Your device could not read that file. If it is in Google Drive or another cloud app, " +
+            "download it to this device first, then choose it again.",
+          "error",
+        );
+      } finally {
+        reading = false;
+        if (cvSubmit) cvSubmit.disabled = false;
+      }
     };
 
-    cvFile.addEventListener("change", showFile);
+    cvFile.addEventListener("change", () => take(cvFile.files && cvFile.files[0]));
 
     ["dragenter", "dragover"].forEach((type) =>
       dropzone.addEventListener(type, (event) => {
@@ -103,64 +163,58 @@
       const dropped = event.dataTransfer && event.dataTransfer.files;
       if (dropped && dropped.length) {
         cvFile.files = dropped;
-        showFile();
+        take(dropped[0]);
       }
     });
 
-    /* A picked file is a reference, not a copy, and the reference can go stale
-       — moved, edited, or (commonly on mobile) chosen from a cloud provider
-       that later withdraws it. The browser only discovers this mid-upload, and
-       what the visitor sees is a blank error page reading
-       ERR_UPLOAD_FILE_CHANGED, with their filled-in form gone.
-
-       So read one byte before letting the submit go. If that fails the file is
-       already unreadable, and saying so — with the form still on screen — beats
-       finding out after the navigation. */
-    const cvForm = $("#cv-form");
-    const cvStatus = $("#cv-status");
+    /* Submit the copy rather than the reference. Without JavaScript the form
+       still posts natively — worse for cloud files, but never broken. */
     if (cvForm) {
-      cvForm.addEventListener("submit", (event) => {
-        const file = cvFile.files && cvFile.files[0];
-        // Nothing chosen: let the browser's own required-field message handle it.
-        if (!file) return;
+      cvForm.addEventListener("submit", async (event) => {
+        if (reading) {
+          event.preventDefault();
+          setStatus("Still preparing your file — one moment, then press again.", "");
+          return;
+        }
+        // No copy held: let the browser's own required-field handling speak.
+        if (!held) return;
 
         event.preventDefault();
-        file
-          .slice(0, 1)
-          .arrayBuffer()
-          .then(() => {
-            // Readable. Submit natively, bypassing this listener.
-            HTMLFormElement.prototype.submit.call(cvForm);
-          })
-          .catch(() => {
-            dropzone.classList.remove("has-file");
-            cvFile.value = "";
-            dropzoneText.innerHTML = "<strong>Choose your CV again</strong> or drop it here";
-            if (cvStatus) {
-              cvStatus.className = "form__status is-error";
-              cvStatus.textContent =
-                "Your device can no longer read that file — it may have been moved, or picked from cloud storage that has since released it. Please choose it again. Saving it to this device first is the most reliable.";
-            }
-            dropzone.scrollIntoView({ block: "center", behavior: "smooth" });
+        if (cvSubmit) {
+          cvSubmit.disabled = true;
+          cvSubmit.textContent = "Uploading…";
+        }
+        setStatus("");
+
+        try {
+          const body = new FormData(cvForm);
+          // Replace the live reference with the copy taken at pick time.
+          body.set("cv", held.blob, held.name);
+
+          const response = await fetch(cvForm.getAttribute("action") || "/", {
+            method: "POST",
+            body,
           });
+          if (!response.ok) throw Object.assign(new Error(`HTTP ${response.status}`), { status: response.status });
+
+          window.location.assign("/thanks");
+        } catch (error) {
+          console.error("CV submission failed", error);
+          const code = error && error.status;
+          setStatus(
+            "That did not go through" +
+              (code ? ` (error ${code})` : " — no response from the server") +
+              ". Please try again, or send your CV to imanagement19@gmail.com, or WhatsApp +964 772 252 1000.",
+            "error",
+          );
+          if (cvSubmit) {
+            cvSubmit.disabled = false;
+            cvSubmit.textContent = "Join the CV Pool";
+          }
+        }
       });
     }
   }
-
-  /* ========================================================= form submit ==
-
-     The three forms submit natively — no fetch, no interception.
-
-     They were AJAX at first, for an inline success panel without leaving the
-     page. Netlify rejected those POSTs and the browser gave us nothing to go
-     on, so this trades a nicety for the path the form host documents and tests
-     hardest: a plain browser submit to action="/thanks". When it fails now it
-     fails onto a page that says why, instead of a red line that cannot.
-
-     What is left below is the file picker, which is presentation only. If the
-     inline panel is worth another attempt later, bring it back as an
-     enhancement over a form that already works without it.
-  ========================================================================== */
 
   /* ============================================================ Ideal AI == */
 

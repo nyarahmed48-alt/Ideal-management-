@@ -104,6 +104,27 @@ the deployed HTML at build time, and submissions appear under *Project
 configuration → Forms*. The CV form is `multipart/form-data`, so the file itself
 is stored with the submission and downloadable from there.
 
+### Cloud files, and why the CV form holds a copy
+
+A picked file is a reference, not a copy, and a cloud provider can withdraw it.
+On Android a CV chosen from Google Drive is a `content://` URI that may be gone
+by the time the form is submitted — the browser finds out mid-upload and aborts
+with `ERR_UPLOAD_FILE_CHANGED`, leaving a blank error page and a lost form.
+Drive is where most people keep their CV, so on a public recruitment site this
+is the common path rather than an edge case.
+
+So `app.js` reads the file into memory the moment it is chosen, while the
+reference is certainly still valid, and submits that copy. Whatever the provider
+does afterwards no longer matters. Reading a cloud file also forces it to
+download, which is why choosing one shows a "preparing" state before the size
+appears — on a slow connection with a large CV, that pause is the download.
+
+If the file cannot be read even at pick time, the form says so immediately and
+suggests downloading it to the device, rather than failing at submit.
+
+Without JavaScript the form still posts natively. That is worse for cloud files
+but never broken, which is the right way round.
+
 Two things to know before this goes into real use:
 
 - **Submission limits.** Netlify's free tier includes 100 form submissions a
