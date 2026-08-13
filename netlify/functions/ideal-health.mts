@@ -239,7 +239,13 @@ export default async (request: Request, context: Context) => {
     if (response.ok) {
       report.state = "ok";
       /* The simple probe passing is not the same as the chat working, so say
-         so explicitly rather than letting "ok" imply more than it proves. */
+         so explicitly rather than letting "ok" imply more than it proves.
+
+         Behind ?deep=1 because it costs a second provider call, and on a free
+         tier the request budget is the scarce thing — a health check that
+         quietly doubles the burn rate is how you exhaust the quota you are
+         trying to diagnose. */
+      if (new URL(request.url).searchParams.get("deep") === "1") {
       report.chatProbe = await chatShapedProbe(
         base,
         apiKey,
@@ -252,12 +258,16 @@ export default async (request: Request, context: Context) => {
         report.detail =
           "The key and model id are fine, but a request shaped like a real conversation fails. See chatProbe.hint.";
       }
+      } else {
+        report.chatProbe = "skipped — add ?deep=1 to test a full chat-shaped request (costs one more provider call)";
+      }
     } else if (response.status === 401 || response.status === 403) {
       report.state = "auth";
       report.detail = "The key was rejected — it may be revoked or lack permission for this model.";
     } else if (response.status === 402 || response.status === 429) {
       report.state = "quota";
-      report.detail = "Out of credit or over the free daily cap. It should recover, or set a paid model id.";
+      report.detail =
+        "Rate limited or out of credit — not a broken configuration. Free model variants cap how many requests an account may make per day, and that cap is shared across every ':free' id, so adding a second free model does not raise it. It resets on the provider's schedule; adding credit or using a paid id removes the ceiling. Check the account's limits and activity pages for the current figures.";
     } else if (response.status === 404 || response.status === 400) {
       report.state = "model";
       report.detail = "The configured model id was not accepted. It may have been renamed or retired.";

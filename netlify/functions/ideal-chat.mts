@@ -59,6 +59,13 @@ const JSON_HEADERS = { "content-type": "application/json" };
 const FALLBACK_MESSAGE =
   "I can't reach my assistant service at the moment. Please try again shortly, or contact us directly — +964 772 252 1000 or imanagement19@gmail.com.";
 
+/* A rate limit is not an outage, and saying "I can't reach my service" when
+   the truth is "too many questions today" sends the visitor away thinking the
+   site is broken. Free tiers cap requests per day, so this is the failure a
+   visitor is most likely to actually meet. */
+const BUSY_MESSAGE =
+  "I've hit my limit of questions for now, so I can't answer this one. Please try again a bit later — or contact us directly on +964 772 252 1000 or imanagement19@gmail.com and a person will help you straight away.";
+
 const NOT_CONFIGURED_MESSAGE =
   "Ideal AI isn't switched on for this deployment yet. Call or WhatsApp +964 772 252 1000, or email imanagement19@gmail.com, and one of our consultants will help you directly.";
 
@@ -225,7 +232,15 @@ export default async (request: Request, context: Context) => {
     }
   }
 
-  return jsonResponse({ error: "UPSTREAM_FAILED", message: FALLBACK_MESSAGE }, 502);
+  // Tell the visitor which kind of failure this is, in their terms.
+  const rateLimited = lastStatus === 429 || lastStatus === 402;
+  return jsonResponse(
+    {
+      error: rateLimited ? "RATE_LIMITED" : "UPSTREAM_FAILED",
+      message: rateLimited ? BUSY_MESSAGE : FALLBACK_MESSAGE,
+    },
+    rateLimited ? 429 : 502,
+  );
 };
 
 export const config: Config = {
