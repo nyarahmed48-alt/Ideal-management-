@@ -138,7 +138,11 @@
           method: "POST",
           body,
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) {
+          const error = new Error(`HTTP ${response.status}`);
+          error.status = response.status;
+          throw error;
+        }
 
         const panel = form.parentElement;
         form.remove();
@@ -151,8 +155,23 @@
       } catch (error) {
         console.error("Form submission failed", error);
         statusEl.className = "form__status is-error";
+        /* Name the failure. "That did not go through" alone sends whoever is
+           debugging back to guessing, and a 404 here (the form host has not
+           registered this form) needs a completely different fix from a 413
+           (file too large) — which the visitor can act on themselves. */
+        const code = error && error.status;
+        const detail =
+          code === 404
+            ? " (error 404 — the form is not registered on the server yet)"
+            : code === 413
+              ? " (error 413 — the file is too large)"
+              : code
+                ? ` (error ${code})`
+                : " (no response from the server)";
         statusEl.textContent =
-          "That did not go through. Please try again, or call or WhatsApp +964 772 252 1000, or email imanagement19@gmail.com, and we will pick it up from there.";
+          "That did not go through" +
+          detail +
+          ". Please try again, or call or WhatsApp +964 772 252 1000, or email imanagement19@gmail.com, and we will pick it up from there.";
         if (button) {
           button.disabled = false;
           button.textContent = idleLabel;
