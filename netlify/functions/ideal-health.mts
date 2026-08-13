@@ -181,6 +181,7 @@ export default async (request: Request, context: Context) => {
   /* The origin the visitor actually reached is the one guaranteed to be live
      and correct; the configured URL is only a fallback for when there is no
      request to learn it from. */
+  const params = new URL(request.url).searchParams;
   const siteUrl = new URL(request.url).origin || context.site?.url || Netlify.env.get("URL") || "";
   const knowledge = await getSiteKnowledge(siteUrl);
 
@@ -200,6 +201,15 @@ export default async (request: Request, context: Context) => {
     },
     checkedAt: new Date().toISOString(),
   };
+
+  /* ?models=1 lists the free ids the provider publishes, whatever state we are
+     in. It used to appear only after a model-class failure, which is no use
+     when the failure is a provider-side 429 and what you need right now is a
+     second id to fall back to. The catalogue is public and costs no quota. */
+  if (params.get("models") === "1") {
+    const base = (Netlify.env.get("OPENROUTER_BASE_URL") || "https://openrouter.ai/api/v1").replace(/\/$/, "");
+    report.availableFreeModels = await freeModelIds(base, apiKey || "", models[0]);
+  }
 
   if (!apiKey) {
     report.state = "not-configured";
@@ -245,7 +255,7 @@ export default async (request: Request, context: Context) => {
          tier the request budget is the scarce thing — a health check that
          quietly doubles the burn rate is how you exhaust the quota you are
          trying to diagnose. */
-      if (new URL(request.url).searchParams.get("deep") === "1") {
+      if (params.get("deep") === "1") {
       report.chatProbe = await chatShapedProbe(
         base,
         apiKey,
