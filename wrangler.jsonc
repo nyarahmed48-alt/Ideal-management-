@@ -9,6 +9,12 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-08-13",
 
+  // Give the Worker a URL. Without this a deploy can succeed and still be
+  // unreachable — the dashboard shows "No URLs enabled" and there is nothing
+  // to visit, which looks exactly like a broken deploy. Replaced by a custom
+  // domain later; harmless to leave on alongside one.
+  "workers_dev": true,
+
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
