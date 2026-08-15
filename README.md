@@ -69,10 +69,25 @@ npx wrangler dev
 
 ## Deploying
 
-Connected to GitHub: every push to `main` deploys. To set it up once —
-**Workers & Pages → Create → Import a repository**, pick this repo, and accept
-the defaults; `wrangler.jsonc` supplies the rest. No build command, no output
-directory.
+**Workers & Pages → Create → Import a repository**, pick this repo, accept the
+defaults. No build command, no output directory. Every push to `main` then
+deploys.
+
+The first deploy binds nothing but the static assets and one variable, on
+purpose: a binding that points at a resource in another account fails the whole
+deploy, and the site and Ideal AI do not need one. Get those live, then switch
+the forms on.
+
+### Switching the forms on
+
+Until this is done, the three forms answer with a clear "not accepting
+submissions yet" and the phone number — they never pretend to have saved
+something.
+
+1. **Storage & Databases → KV → Create a namespace** (any name), copy its ID.
+2. Uncomment the `kv_namespaces` block in `wrangler.jsonc` and paste the ID in.
+3. Push. Set `ADMIN_PASSWORD` as a Secret if you have not already.
+4. Submit a test CV, then open `/admin`.
 
 ## How Ideal AI learns the site
 

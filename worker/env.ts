@@ -9,8 +9,9 @@
 export interface Env {
   /** The static site in `public/`, fetchable from Worker code. */
   ASSETS: Fetcher;
-  /** Form submissions, and the CV files attached to them. */
-  SUBMISSIONS: KVNamespace;
+  /** Form submissions and their CVs. Optional so the site can deploy before
+   *  storage is wired up; the form route refuses clearly when it is missing. */
+  SUBMISSIONS?: KVNamespace;
   /** Optional. If R2 is enabled and bound, files go here instead of KV. */
   UPLOADS?: R2Bucket;
 

@@ -49,6 +49,15 @@ export async function handleSubmit(request: Request, env: Env): Promise<Response
     return done(false, "We couldn't read that submission.", 400);
   }
 
+  if (!env.SUBMISSIONS) {
+    console.error("Submission: no SUBMISSIONS binding — storage is not configured on this deployment.");
+    return done(
+      false,
+      `Our form isn't accepting submissions yet. Please send this to ${CONTACT.email} or WhatsApp ${CONTACT.phone} — we'll pick it up straight away.`,
+      503,
+    );
+  }
+
   const formName = String(form.get("form-name") || "").trim();
   if (!FORMS.has(formName)) {
     console.warn(`Submission: unknown form name ${JSON.stringify(formName)}`);
@@ -87,7 +96,7 @@ export async function handleSubmit(request: Request, env: Env): Promise<Response
         httpMetadata: { contentType: upload.type || "application/octet-stream" },
       });
     } else {
-      await env.SUBMISSIONS.put(fileKey, bytes, {
+      await env.SUBMISSIONS!.put(fileKey, bytes, {
         metadata: { contentType: upload.type || "application/octet-stream", name: upload.name },
       });
     }
@@ -103,7 +112,7 @@ export async function handleSubmit(request: Request, env: Env): Promise<Response
   const record = { id, form: formName, at: new Date(at).toISOString(), fields, file };
 
   try {
-    await env.SUBMISSIONS.put(key, JSON.stringify(record));
+    await env.SUBMISSIONS!.put(key, JSON.stringify(record));
   } catch (error) {
     // Storage failing is the one case where telling the visitor "sent" would be
     // a lie that costs them a job application.
@@ -185,6 +194,13 @@ const escapeHtml = (value: string) =>
 export async function handleAdmin(request: Request, env: Env): Promise<Response> {
   if (!authorised(request, env)) return unauthorised();
 
+  if (!env.SUBMISSIONS) {
+    return new Response(
+      "Submission storage is not configured on this deployment yet — add the SUBMISSIONS KV binding in wrangler.jsonc.",
+      { status: 503, headers: { "content-type": "text/plain;charset=utf-8" } },
+    );
+  }
+
   const url = new URL(request.url);
 
   // A file download: /admin/file/<storedAt>
@@ -203,7 +219,7 @@ export async function handleAdmin(request: Request, env: Env): Promise<Response>
       });
     }
 
-    const { value, metadata } = await env.SUBMISSIONS.getWithMetadata(storedAt, "arrayBuffer");
+    const { value, metadata } = await env.SUBMISSIONS!.getWithMetadata(storedAt, "arrayBuffer");
     if (!value) return new Response("Not found", { status: 404 });
     const meta = (metadata || {}) as { contentType?: string; name?: string };
     return new Response(value, {
@@ -214,10 +230,10 @@ export async function handleAdmin(request: Request, env: Env): Promise<Response>
     });
   }
 
-  const listed = await env.SUBMISSIONS.list({ prefix: "sub:", limit: 200 });
+  const listed = await env.SUBMISSIONS!.list({ prefix: "sub:", limit: 200 });
   const records = await Promise.all(
     listed.keys.map(async (entry) => {
-      const raw = await env.SUBMISSIONS.get(entry.name);
+      const raw = await env.SUBMISSIONS!.get(entry.name);
       try {
         return raw ? JSON.parse(raw) : null;
       } catch {

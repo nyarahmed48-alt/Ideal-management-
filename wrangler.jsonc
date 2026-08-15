@@ -22,16 +22,19 @@
 
   // Form submissions and the CVs attached to them.
   //
-  // KV rather than R2 because R2 needs enabling on the account first, and this
-  // works today. Values may be up to 25 MiB and a CV is capped at 8 MB, so it
-  // fits comfortably. If R2 is enabled later, add an UPLOADS bucket binding
-  // and the Worker will prefer it — that is a config change, not a code one.
-  "kv_namespaces": [
-    {
-      "binding": "SUBMISSIONS",
-      "id": "4403080e34d04757a50abfcd29996841"
-    }
-  ],
+  // Deliberately left out of the first deploy: a binding pointing at a resource
+  // in the wrong account fails the whole deploy, and the site plus Ideal AI do
+  // not need it. Get those live first, then switch the forms on.
+  //
+  // To switch them on: Storage & Databases → KV → Create a namespace, copy its
+  // ID, uncomment the block below, paste it in, and push.
+  //
+  // "kv_namespaces": [
+  //   { "binding": "SUBMISSIONS", "id": "PASTE_YOUR_KV_NAMESPACE_ID_HERE" }
+  // ],
+  //
+  // If R2 is ever enabled, add an UPLOADS bucket binding as well and files go
+  // there instead of KV — a config change, not a code one.
 
   // Plain variables, editable in the dashboard and live immediately — no
   // redeploy, which is the whole reason for moving off the previous host.
